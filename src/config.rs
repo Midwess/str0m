@@ -47,6 +47,8 @@ pub struct RtcConfig {
     pub(crate) dtls_version: DtlsVersion,
     pub(crate) vp9_packetizer_mode: Vp9PacketizerMode,
     pub(crate) snap_enabled: bool,
+    pub(crate) sctp_max_message_size: usize,
+    pub(crate) sctp_buffer_size: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -608,6 +610,26 @@ impl RtcConfig {
         self.vp9_packetizer_mode
     }
 
+    /// Sets the maximum message size for SCTP data channels.
+    ///
+    /// This value is advertised in the SDP and enforced by the SCTP stack.
+    ///
+    /// Defaults to 256KB (262144 bytes).
+    pub fn set_sctp_max_message_size(mut self, v: usize) -> Self {
+        self.sctp_max_message_size = v;
+        self
+    }
+
+    /// Sets the total buffer size across all SCTP data channels.
+    ///
+    /// This limits how much data can be buffered in memory before `write` calls start returning `Ok(false)`.
+    ///
+    /// Defaults to 128KB (131072 bytes).
+    pub fn set_sctp_buffer_size(mut self, v: usize) -> Self {
+        self.sctp_buffer_size = v;
+        self
+    }
+
     /// Create a [`Rtc`] from the configuration.
     pub fn build(self, start: Instant) -> Rtc {
         Rtc::new_from_config(self, start).expect("Failed to create Rtc from config")
@@ -644,6 +666,8 @@ impl Default for RtcConfig {
             dtls_version: DtlsVersion::Dtls12,
             vp9_packetizer_mode: Vp9PacketizerMode::default(),
             snap_enabled: false,
+            sctp_max_message_size: 256 * 1024,
+            sctp_buffer_size: 128 * 1024,
         }
     }
 }

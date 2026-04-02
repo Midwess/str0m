@@ -52,7 +52,7 @@ pub(crate) struct Session {
     pub streams: Streams,
 
     /// The app m-line. Spliced into medias above.
-    app: Option<(Mid, usize)>,
+    app: Option<(Mid, usize, usize)>,
 
     reordering_size_audio: usize,
     reordering_size_video: usize,
@@ -111,6 +111,8 @@ pub(crate) struct Session {
 
     #[cfg(feature = "_internal_test_exports")]
     pending_probe: Option<crate::bwe_::ProbeClusterConfig>,
+
+    pub sctp_max_message_size: usize,
 }
 
 impl Session {
@@ -175,6 +177,7 @@ impl Session {
             },
             #[cfg(feature = "_internal_test_exports")]
             pending_probe: None,
+            sctp_max_message_size: config.sctp_max_message_size,
         }
     }
 
@@ -183,7 +186,7 @@ impl Session {
     }
 
     pub fn set_app(&mut self, mid: Mid, index: usize) -> Result<(), String> {
-        if let Some((mid_existing, index_existing)) = self.app {
+        if let Some((mid_existing, index_existing, _)) = self.app {
             if mid_existing != mid {
                 return Err(format!("App mid changed {} != {}", mid, mid_existing,));
             }
@@ -191,12 +194,12 @@ impl Session {
                 return Err(format!("App index changed {} != {}", index, index_existing,));
             }
         } else {
-            self.app = Some((mid, index));
+            self.app = Some((mid, index, self.sctp_max_message_size));
         }
         Ok(())
     }
 
-    pub fn app(&self) -> &Option<(Mid, usize)> {
+    pub fn app(&self) -> &Option<(Mid, usize, usize)> {
         &self.app
     }
 

@@ -408,12 +408,10 @@ impl<'a> SdpApi<'a> {
     /// # }
     /// ```
     pub fn add_channel_with_config(&mut self, config: ChannelConfig) -> ChannelId {
-        let has_media = self.rtc.session.app().is_some();
-        let changes_contains_add_app = self.changes.contains_add_app();
-
-        if !has_media && !changes_contains_add_app {
+        if self.rtc.session.app().is_none() {
             let mid = self.rtc.new_mid();
-            self.changes.0.push(Change::AddApp(mid));
+            let max_msg = self.rtc.session.sctp_max_message_size;
+            self.changes.0.push(Change::AddApp(mid, max_msg));
         }
 
         let id = self.rtc.chan.new_channel(&config);
@@ -567,7 +565,7 @@ impl SdpPendingOffer {
         fn is_relevant(rtc: &Rtc, c: &Change) -> bool {
             match c {
                 Change::AddMedia(v) => rtc.media(v.mid).is_none(),
-                Change::AddApp(_) => rtc.session.app().is_none(),
+                Change::AddApp(_, _) => rtc.session.app().is_none(),
                 Change::AddChannel(v) => rtc.chan.stream_id_by_channel_id(v.0).is_none(),
                 Change::Direction(m, d) => {
                     // If mid is missing, this is not relevant.
@@ -603,7 +601,7 @@ impl Changes {
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum Change {
     AddMedia(AddMedia),
-    AddApp(Mid),
+    AddApp(Mid, usize),
     AddChannel((ChannelId, ChannelConfig)),
     Direction(Mid, Direction),
     IceRestart(IceCreds, bool),
@@ -645,7 +643,7 @@ fn requires_negotiation(c: &Change) -> bool {
     match c {
         Change::IceRestart(_, _) => true,
         Change::AddMedia(_) => true,
-        Change::AddApp(_) => true,
+        Change::AddApp(_, _) => true,
         Change::AddChannel(_) => false,
         Change::Direction(_, _) => true,
     }
@@ -1063,7 +1061,7 @@ fn sync_medias<'a>(session: &mut Session, sdp: &'a Sdp) -> Result<Vec<&'a MediaL
         // First, match existing m-lines.
         match m.typ {
             MediaType::Application => {
-                if let Some((_, index)) = session.app() {
+                if let Some((_, index, _)) = session.app() {
                     if idx != *index {
                         return index_err(m.mid());
                     }
@@ -1353,7 +1351,7 @@ trait AsSdpMediaLine {
     ) -> MediaLine;
 }
 
-impl AsSdpMediaLine for (Mid, usize) {
+impl AsSdpMediaLine for (Mid, usize, usize) {
     fn mid(&self) -> Mid {
         self.0
     }
@@ -1375,7 +1373,7 @@ impl AsSdpMediaLine for (Mid, usize) {
     ) -> MediaLine {
         attrs.push(MediaAttribute::Mid(self.0));
         attrs.push(MediaAttribute::SctpPort(5000));
-        attrs.push(MediaAttribute::MaxMessageSize(262144));
+        attrs.push(MediaAttribute::MaxMessageSize(self.2));
 
         MediaLine {
             typ: sdp::MediaType::Application,
@@ -1409,7 +1407,7 @@ impl AsSdpMediaLine for Media {
         params: &[PayloadParams],
     ) -> MediaLine {
         if self.app_tmp {
-            let app = (self.mid(), self.index());
+            let app = (self.mid(), self.index(), self.sctp_max_message_size);
             return app.as_media_line(attrs, ssrcs_tx, exts, params);
         }
 
@@ -1596,7 +1594,7 @@ impl fmt::Debug for SdpPendingOffer {
 impl Changes {
     pub fn contains_add_app(&self) -> bool {
         for i in 0..self.0.len() {
-            if matches!(&self.0[i], Change::AddApp(_)) {
+            if matches!(&self.0[i], Change::AddApp(_, _)) {
                 return true;
             }
         }
@@ -1646,7 +1644,7 @@ impl Changes {
                         }
                         continue 'next;
                     }
-                    AddApp(v) if *v == mid => {
+                    AddApp(v, _) if *v == mid => {
                         if !l.typ.is_channel() {
                             return Some(format!(
                                 "Answer m-line for mid ({}) is not a data channel: {:?}",
@@ -1668,7 +1666,7 @@ impl Changes {
     fn count_new_medias(&self) -> usize {
         self.0
             .iter()
-            .filter(|c| matches!(c, Change::AddMedia(_) | Change::AddApp(_)))
+            .filter(|c| matches!(c, Change::AddMedia(_) | Change::AddApp(_, _)))
             .count()
     }
 
@@ -1743,7 +1741,7 @@ impl Change {
 
                 Some(Media::from_add_media(add))
             }
-            AddApp(mid) => Some(Media::from_app_tmp(*mid, index)),
+            AddApp(mid, max_msg) => Some(Media::from_app_tmp(*mid, index, *max_msg)),
             _ => None,
         }
     }
@@ -1848,7 +1846,7 @@ mod test {
         // Buggy indices:    AddApp → 0, AddMedia(audio) → 2
         let mut changes = Changes::default();
         let mid_app = rtc.new_mid();
-        changes.0.push(Change::AddApp(mid_app));
+        changes.0.push(Change::AddApp(mid_app, 262144));
         let mid_audio = rtc.new_mid();
         let chan_id = rtc.chan.new_channel(&ChannelConfig {
             label: "ch".into(),

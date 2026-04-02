@@ -132,10 +132,11 @@ pub struct Media {
     pub(crate) need_open_event: bool,
     pub(crate) need_changed_event: bool,
 
-    /// When converting media lines to SDP, it's easier to represent the app m-line
-    /// as a Media. This field is true when we do that. No Session::medias will have
     /// this set to true – they only exist temporarily.
     pub(crate) app_tmp: bool,
+
+    /// Maximum message size for SCTP data channels (only relevant for app_tmp).
+    pub(crate) sctp_max_message_size: usize,
 }
 
 #[derive(Debug)]
@@ -569,6 +570,7 @@ impl Default for Media {
             to_payload: VecDeque::default(),
             need_open_event: true,
             need_changed_event: false,
+            sctp_max_message_size: 256 * 1024,
         }
     }
 }
@@ -617,11 +619,12 @@ impl Media {
         }
     }
 
-    pub(crate) fn from_app_tmp(mid: Mid, index: usize) -> Media {
+    pub(crate) fn from_app_tmp(mid: Mid, index: usize, max_message_size: usize) -> Media {
         Media {
             mid,
             index,
             app_tmp: true,
+            sctp_max_message_size: max_message_size,
             ..Default::default()
         }
     }

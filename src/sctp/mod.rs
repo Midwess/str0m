@@ -26,8 +26,6 @@ use dcep::DcepOpen;
 mod error;
 pub use error::SctpError;
 
-/// Bytes that can be buffered inside str0m across all streams.
-const MAX_BUFFERED_ACROSS_STREAMS: usize = 128 * 1024;
 
 pub(crate) struct RtcSctp {
     state: RtcSctpState,
@@ -41,6 +39,8 @@ pub(crate) struct RtcSctp {
     client: bool,
     snap_enabled: bool,
     snap_init: Option<SctpInitData>,
+    max_message_size: usize,
+    max_buffered_across_streams: usize,
 }
 
 /// This is okay because there is no way for a user of Rtc to interact with the Sctp subsystem
@@ -234,14 +234,14 @@ impl StreamEntry {
 }
 
 impl RtcSctp {
-    pub fn new() -> Self {
+    pub fn new(max_message_size: usize, max_buffered_across_streams: usize) -> Self {
         let mut config = EndpointConfig::default();
         // Default here is 1200, I've seen warnings that are 77 over.
         // DTLS above MTU 1200: 1277
         // Let's try 1120, see if we can avoid warnings.
         config.max_payload_size(1120);
         let mut server_config = ServerConfig::default();
-        server_config.transport = webrtc_transport_config();
+        server_config.transport = webrtc_transport_config(max_message_size as u32);
         let endpoint = Endpoint::new(Arc::new(config), Some(Arc::new(server_config)));
         let fake_addr = "1.1.1.1:5000".parse().unwrap();
 
@@ -257,6 +257,8 @@ impl RtcSctp {
             client: false,
             snap_enabled: false,
             snap_init: None,
+            max_message_size,
+            max_buffered_across_streams,
         }
     }
 
@@ -309,7 +311,7 @@ impl RtcSctp {
             set_state(&mut self.state, RtcSctpState::Established);
         } else if client {
             // Normal client path: initiate the SCTP association.
-            let config = SctpInitData::default().into_client_config();
+            let config = SctpInitData::new(self.max_message_size as u32).into_client_config();
             debug!("New local association (out-of-band: false)");
             let (handle, assoc) = self
                 .endpoint
@@ -333,7 +335,8 @@ impl RtcSctp {
     /// Enable SNAP by pre-populating the init data.
     pub fn enable_snap(&mut self) {
         self.snap_enabled = true;
-        self.snap_init.get_or_insert_with(SctpInitData::new);
+        let max_msg = self.max_message_size as u32;
+        self.snap_init.get_or_insert_with(|| SctpInitData::new(max_msg));
     }
 
     /// Whether local offers should opt in to SNAP.
@@ -344,7 +347,8 @@ impl RtcSctp {
     /// Ensure the local SNAP INIT chunk is generated. Returns `false` if
     /// generation failed (degrades to non-SNAP).
     pub fn ensure_local_snap_init(&mut self) -> bool {
-        let init_data = self.snap_init.get_or_insert_with(SctpInitData::new);
+        let max_msg = self.max_message_size as u32;
+        let init_data = self.snap_init.get_or_insert_with(|| SctpInitData::new(max_msg));
         if init_data.local_init_chunk().is_err() {
             self.snap_init = None;
             false
@@ -394,7 +398,8 @@ impl RtcSctp {
     /// Set the remote SNAP INIT from a base64 string. Returns `Ok(true)` if
     /// accepted, `Ok(false)` on decode error (degrades to non-SNAP).
     pub fn set_remote_snap_init_string(&mut self, value: &str) -> bool {
-        let init_data = self.snap_init.get_or_insert_with(SctpInitData::new);
+        let max_msg = self.max_message_size as u32;
+        let init_data = self.snap_init.get_or_insert_with(|| SctpInitData::new(max_msg));
         match init_data.set_remote_init_string(value) {
             Ok(()) => true,
             Err(_) => {
@@ -503,7 +508,7 @@ impl RtcSctp {
             })
             .sum();
 
-        MAX_BUFFERED_ACROSS_STREAMS - total
+        self.max_buffered_across_streams - total
     }
 
     pub fn write(&mut self, id: u16, binary: bool, buf: &[u8]) -> Result<usize, SctpError> {
@@ -1099,8 +1104,8 @@ mod tests {
     #[test]
     fn partial_snap_init_requires_both_chunks() {
         let now = Instant::now();
-        let mut sctp = RtcSctp::new();
-        let mut init_data = SctpInitData::new();
+        let mut sctp = RtcSctp::new(262144, 131072);
+        let mut init_data = SctpInitData::new(262144);
 
         init_data.local_init_chunk().unwrap();
 
@@ -1113,7 +1118,7 @@ mod tests {
 
     #[test]
     fn malformed_remote_snap_does_not_disable_local_opt_in() {
-        let mut sctp = RtcSctp::new();
+        let mut sctp = RtcSctp::new(262144, 131072);
         sctp.enable_snap();
 
         assert!(!sctp.set_remote_snap_init_string("!!!not-valid-base64!!!"));
@@ -1125,8 +1130,8 @@ mod tests {
     /// Helper to connect a client and server RtcSctp pair to Established state.
     fn connect_client_server() -> (RtcSctp, RtcSctp) {
         let now = Instant::now();
-        let mut client = RtcSctp::new();
-        let mut server = RtcSctp::new();
+        let mut client = RtcSctp::new(262144, 131072);
+        let mut server = RtcSctp::new(262144, 131072);
 
         client.init(true, now, None).unwrap();
         server.init(false, now, None).unwrap();

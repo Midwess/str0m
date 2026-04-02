@@ -13,11 +13,13 @@ use super::SctpError as Error;
 ///
 /// For WebRTC, we never want to give up retransmitting init and data packets.
 /// The connectivity is in ICE, and SCTP should not give up until ICE gives up.
-pub(super) fn webrtc_transport_config() -> Arc<TransportConfig> {
+pub(super) fn webrtc_transport_config(max_message_size: u32) -> Arc<TransportConfig> {
     Arc::new(
         TransportConfig::default()
             .with_max_init_retransmits(None)
-            .with_max_data_retransmits(None),
+            .with_max_data_retransmits(None)
+            .with_max_send_message_size(max_message_size)
+            .with_max_receive_message_size(max_message_size),
     )
 }
 
@@ -40,9 +42,9 @@ pub(super) fn webrtc_transport_config() -> Arc<TransportConfig> {
 ///
 /// # Example
 /// ```
-/// use str0m::channel::SctpInitData;
+/// # use str0m::sctp::SctpInitData;
 ///
-/// let mut data = SctpInitData::new();
+/// let mut data = SctpInitData::new(262144);
 ///
 /// // Get local INIT chunk to send to remote peer
 /// let local_init = data.local_init_chunk().expect("valid chunk");
@@ -57,23 +59,17 @@ pub struct SctpInitData {
     pub(crate) remote_init: Option<Vec<u8>>,
 }
 
-impl Default for SctpInitData {
-    fn default() -> Self {
-        SctpInitData {
-            transport: webrtc_transport_config(),
-            local_init: None,
-            remote_init: None,
-        }
-    }
-}
-
 impl SctpInitData {
     /// Creates new default SCTP INIT data.
     ///
     /// By default, max init and data retransmits are set to `None` (unlimited),
     /// which is recommended for WebRTC where connectivity is managed by ICE.
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(max_message_size: u32) -> Self {
+        SctpInitData {
+            transport: webrtc_transport_config(max_message_size),
+            local_init: None,
+            remote_init: None,
+        }
     }
 
     /// Get the local INIT chunk bytes for out-of-band signaling.
@@ -105,65 +101,44 @@ impl SctpInitData {
     ///
     /// If you plan to call `start_sctp_with_snap()`, call this method first so
     /// the local INIT is captured in the `SctpInitData` you pass in.
-    pub fn local_init_string(&mut self) -> Result<String, Error> {
-        self.local_init_chunk().map(|c| b64_encode(&c))
+    pub fn local_init_chunk_string(&mut self) -> Result<String, Error> {
+        let b = self.local_init_chunk()?;
+        Ok(Base64::encode_string(&b))
     }
 
-    /// Check if remote INIT chunk has been configured for out-of-band signaling.
-    pub fn has_remote_init_chunk(&self) -> bool {
-        self.remote_init.is_some()
+    /// Set the remote INIT chunk.
+    pub fn set_remote_init_chunk(&mut self, bytes: Vec<u8>) {
+        self.remote_init = Some(bytes);
     }
 
-    /// Get the remote INIT chunk as a base64-encoded string, if set.
-    pub fn remote_init_string(&self) -> Option<String> {
-        self.remote_init.as_ref().map(|b| b64_encode(b))
-    }
-
-    /// Set the remote INIT chunk for out-of-band signaling.
-    ///
-    /// When both local and remote INIT chunks are exchanged via a signaling
-    /// channel, the SCTP association can skip the 4-way handshake and go
-    /// directly to established state.
-    ///
-    /// This must be called before starting SCTP with SNAP.
-    pub fn set_remote_init_chunk(&mut self, value: Vec<u8>) {
-        self.remote_init = Some(value);
-    }
-
-    /// Set the remote INIT chunk from a base64-encoded string.
-    ///
-    /// Convenience method for signaling channels that exchange strings (e.g. SDP).
-    pub fn set_remote_init_string(&mut self, value: &str) -> Result<(), Error> {
-        let mut buf = vec![0u8; value.len()];
-        let len = Base64::decode(value, &mut buf)
-            .map_err(|_| Error::InvalidSnap)?
-            .len();
-        buf.truncate(len);
-        self.set_remote_init_chunk(buf);
+    /// Set the remote INIT chunk from a base64 string.
+    pub fn set_remote_init_string(&mut self, s: &str) -> Result<(), Error> {
+        let b = Base64::decode_vec(s).map_err(|e| Error::Proto(sctp_proto::Error::Other(format!("{:?}", e))))?;
+        self.set_remote_init_chunk(b);
         Ok(())
     }
 
-    /// Build a `ClientConfig` from this data, consuming it.
-    ///
-    /// Only used internally by [`super::RtcSctp::init()`] to feed sctp-proto.
+    /// Get the remote INIT chunk as a base64 string, if set.
+    pub fn remote_init_string(&self) -> Option<String> {
+        self.remote_init.as_ref().map(|b| Base64::encode_string(b))
+    }
+
+    /// Return the config for a client association based on these init chunks.
     pub(crate) fn into_client_config(self) -> ClientConfig {
         let mut config = ClientConfig::new();
         config.transport = self.transport;
-        match (self.local_init, self.remote_init) {
-            (Some(local), Some(remote)) => {
-                config = config.with_snap(local.into(), remote.into());
-            }
-            (Some(_), None) | (None, Some(_)) => {
-                unreachable!("SNAP requires both local and remote INIT chunks");
-            }
-            (None, None) => {}
+        if let (Some(local), Some(remote)) = (self.local_init, self.remote_init) {
+            config = config.with_snap(local.into(), remote.into());
         }
         config
     }
+
+    /// Get local INIT chunk for signaling.
+    pub fn local_init_chunk_bytes(&self) -> Option<&[u8]> {
+        self.local_init.as_deref()
+    }
 }
 
-pub(super) fn b64_encode(data: &[u8]) -> String {
-    let mut buf = vec![0u8; Base64::encoded_len(data)];
-    let encoded = Base64::encode(data, &mut buf).expect("buffer sized correctly");
-    encoded.to_string()
+pub(crate) fn b64_encode(b: &[u8]) -> String {
+    Base64::encode_string(b)
 }

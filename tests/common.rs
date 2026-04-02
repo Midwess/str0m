@@ -596,7 +596,7 @@ pub fn remove_sctp_init(sdp: &str) -> String {
 /// Returns `Some((local_init_bytes, SctpInitData))` when `use_snap` is true, `None` otherwise.
 pub fn snap_init_data(use_snap: bool) -> Option<(Vec<u8>, str0m::channel::SctpInitData)> {
     if use_snap {
-        let mut data = str0m::channel::SctpInitData::new();
+        let mut data = str0m::channel::SctpInitData::new(262144);
         let local_init = data
             .local_init_chunk()
             .expect("generate_snap_token should not fail");
