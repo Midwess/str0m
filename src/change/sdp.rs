@@ -408,7 +408,8 @@ impl<'a> SdpApi<'a> {
     /// # }
     /// ```
     pub fn add_channel_with_config(&mut self, config: ChannelConfig) -> ChannelId {
-        if self.rtc.session.app().is_none() {
+        let has_add_app = self.changes.0.iter().any(|c| matches!(c, Change::AddApp(_, _)));
+        if self.rtc.session.app().is_none() && !has_add_app {
             let mid = self.rtc.new_mid();
             let max_msg = self.rtc.session.sctp_max_message_size;
             self.changes.0.push(Change::AddApp(mid, max_msg));

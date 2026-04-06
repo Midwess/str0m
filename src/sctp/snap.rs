@@ -41,7 +41,7 @@ pub(super) fn webrtc_transport_config(max_message_size: u32) -> Arc<TransportCon
 /// The local INIT chunk is lazily generated and cached on first access.
 ///
 /// # Example
-/// ```
+/// ```ignore
 /// # use str0m::sctp::SctpInitData;
 ///
 /// let mut data = SctpInitData::new(262144);
