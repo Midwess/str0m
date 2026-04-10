@@ -678,6 +678,7 @@ pub use config_mod::RtcConfig;
 pub mod config {
     pub use super::crypto::dtls::{DtlsCert, DtlsVersion, KeyingMaterial};
     pub use super::crypto::{CryptoProvider, Fingerprint};
+    pub use sctp_proto::TransportConfig;
 }
 
 /// Low level ICE access.
@@ -1145,7 +1146,11 @@ impl Rtc {
              crypto provider that supports certificate generation.",
             );
 
-        let mut sctp = RtcSctp::new(config.sctp_max_message_size, config.sctp_buffer_size);
+        let mut sctp = RtcSctp::new(
+            config.sctp_max_message_size,
+            config.sctp_buffer_size,
+            config.sctp_transport_config.clone(),
+        );
         if config.snap_enabled {
             sctp.enable_snap();
         }

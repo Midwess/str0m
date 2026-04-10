@@ -72,6 +72,15 @@ impl SctpInitData {
         }
     }
 
+    /// Creates new SCTP INIT data with a specific transport config.
+    pub fn with_transport(transport: Arc<TransportConfig>) -> Self {
+        SctpInitData {
+            transport,
+            local_init: None,
+            remote_init: None,
+        }
+    }
+
     /// Get the local INIT chunk bytes for out-of-band signaling.
     ///
     /// This generates a fresh INIT chunk using the transport config parameters.

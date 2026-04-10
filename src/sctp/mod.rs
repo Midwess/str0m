@@ -9,9 +9,9 @@ use std::time::Instant;
 
 use sctp_proto::{Association, AssociationHandle, DatagramEvent};
 use sctp_proto::{Endpoint, EndpointConfig, Stream, StreamEvent, Transmit};
-use sctp_proto::{Event, Payload, PayloadProtocolIdentifier, ServerConfig};
+use sctp_proto::{Event, Payload, PayloadProtocolIdentifier, ServerConfig, TransportConfig};
 
-use snap::{b64_encode, webrtc_transport_config};
+use snap::b64_encode;
 
 pub use sctp_proto::Error as ProtoError;
 use sctp_proto::ReliabilityType;
@@ -41,6 +41,7 @@ pub(crate) struct RtcSctp {
     snap_init: Option<SctpInitData>,
     max_message_size: usize,
     max_buffered_across_streams: usize,
+    transport: Arc<TransportConfig>,
 }
 
 /// This is okay because there is no way for a user of Rtc to interact with the Sctp subsystem
@@ -234,14 +235,24 @@ impl StreamEntry {
 }
 
 impl RtcSctp {
-    pub fn new(max_message_size: usize, max_buffered_across_streams: usize) -> Self {
+    pub fn new(
+        max_message_size: usize,
+        max_buffered_across_streams: usize,
+        mut transport: TransportConfig,
+    ) -> Self {
         let mut config = EndpointConfig::default();
         // Default here is 1200, I've seen warnings that are 77 over.
         // DTLS above MTU 1200: 1277
         // Let's try 1120, see if we can avoid warnings.
         config.max_payload_size(1120);
+
+        transport = transport
+            .with_max_send_message_size(max_message_size as u32)
+            .with_max_receive_message_size(max_message_size as u32);
+
         let mut server_config = ServerConfig::default();
-        server_config.transport = webrtc_transport_config(max_message_size as u32);
+        let transport = Arc::new(transport);
+        server_config.transport = transport.clone();
         let endpoint = Endpoint::new(Arc::new(config), Some(Arc::new(server_config)));
         let fake_addr = "1.1.1.1:5000".parse().unwrap();
 
@@ -259,6 +270,7 @@ impl RtcSctp {
             snap_init: None,
             max_message_size,
             max_buffered_across_streams,
+            transport: transport.clone(),
         }
     }
 
@@ -311,7 +323,7 @@ impl RtcSctp {
             set_state(&mut self.state, RtcSctpState::Established);
         } else if client {
             // Normal client path: initiate the SCTP association.
-            let config = SctpInitData::new(self.max_message_size as u32).into_client_config();
+            let config = SctpInitData::with_transport(self.transport.clone()).into_client_config();
             debug!("New local association (out-of-band: false)");
             let (handle, assoc) = self
                 .endpoint
@@ -335,8 +347,8 @@ impl RtcSctp {
     /// Enable SNAP by pre-populating the init data.
     pub fn enable_snap(&mut self) {
         self.snap_enabled = true;
-        let max_msg = self.max_message_size as u32;
-        self.snap_init.get_or_insert_with(|| SctpInitData::new(max_msg));
+        self.snap_init
+            .get_or_insert_with(|| SctpInitData::with_transport(self.transport.clone()));
     }
 
     /// Whether local offers should opt in to SNAP.
@@ -347,8 +359,9 @@ impl RtcSctp {
     /// Ensure the local SNAP INIT chunk is generated. Returns `false` if
     /// generation failed (degrades to non-SNAP).
     pub fn ensure_local_snap_init(&mut self) -> bool {
-        let max_msg = self.max_message_size as u32;
-        let init_data = self.snap_init.get_or_insert_with(|| SctpInitData::new(max_msg));
+        let init_data = self
+            .snap_init
+            .get_or_insert_with(|| SctpInitData::with_transport(self.transport.clone()));
         if init_data.local_init_chunk().is_err() {
             self.snap_init = None;
             false
@@ -398,8 +411,9 @@ impl RtcSctp {
     /// Set the remote SNAP INIT from a base64 string. Returns `Ok(true)` if
     /// accepted, `Ok(false)` on decode error (degrades to non-SNAP).
     pub fn set_remote_snap_init_string(&mut self, value: &str) -> bool {
-        let max_msg = self.max_message_size as u32;
-        let init_data = self.snap_init.get_or_insert_with(|| SctpInitData::new(max_msg));
+        let init_data = self
+            .snap_init
+            .get_or_insert_with(|| SctpInitData::with_transport(self.transport.clone()));
         match init_data.set_remote_init_string(value) {
             Ok(()) => true,
             Err(_) => {

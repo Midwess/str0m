@@ -49,6 +49,7 @@ pub struct RtcConfig {
     pub(crate) snap_enabled: bool,
     pub(crate) sctp_max_message_size: usize,
     pub(crate) sctp_buffer_size: usize,
+    pub(crate) sctp_transport_config: sctp_proto::TransportConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -630,6 +631,17 @@ impl RtcConfig {
         self
     }
 
+    /// Set the SCTP transport configuration.
+    pub fn set_sctp_transport_config(mut self, config: sctp_proto::TransportConfig) -> Self {
+        self.sctp_transport_config = config;
+        self
+    }
+
+    /// Get the SCTP transport configuration.
+    pub fn sctp_transport_config(&self) -> &sctp_proto::TransportConfig {
+        &self.sctp_transport_config
+    }
+
     /// Create a [`Rtc`] from the configuration.
     pub fn build(self, start: Instant) -> Rtc {
         Rtc::new_from_config(self, start).expect("Failed to create Rtc from config")
@@ -668,6 +680,9 @@ impl Default for RtcConfig {
             snap_enabled: false,
             sctp_max_message_size: 256 * 1024,
             sctp_buffer_size: 128 * 1024,
+            sctp_transport_config: sctp_proto::TransportConfig::default()
+                .with_max_init_retransmits(None)
+                .with_max_data_retransmits(None),
         }
     }
 }
