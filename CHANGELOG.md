@@ -2,6 +2,10 @@
 
   * Drop stale depacketizer state on stream pause and restore paused timestamp repair #929
 
+# 0.18.2 (Midwess fork)
+
+  * Map `dimpl::Error::TransmitQueueFull` to a WouldBlock-shaped `DtlsError` in `Dtls::handle_input` so the SCTP transmit-feed loop treats a saturated DTLS outbound queue as "back off and retry" rather than a terminal RTC error. Without this, the DTLS-batch drain (introduced in 0.18.1) could feed more than dimpl's 10-datagram queue cap on bursty SCTP windows and tear down the slot. Production logs at 17:14:42 saw a slot terminate with `RTC poll_event error: Rtc("DTLS error: transmit queue full")`; this commit eliminates that path.
+
 # 0.18.1 (Midwess fork)
 
   * Raise SCTP `max_payload_size` from 1120 to 1200, recovering ~7% useful payload per UDP packet within the DTLS-1.2 AEAD overhead envelope.

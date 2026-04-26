@@ -138,7 +138,10 @@ impl Dtls {
     /// Send application data over DTLS.
     pub fn handle_input(&mut self, data: &[u8]) -> Result<(), DtlsError> {
         self.instance.send_application_data(data).map_err(|e| {
-            if matches!(e, dimpl::Error::HandshakePending) {
+            if matches!(
+                e,
+                dimpl::Error::HandshakePending | dimpl::Error::TransmitQueueFull
+            ) {
                 DtlsError::Io(io::Error::new(io::ErrorKind::WouldBlock, e))
             } else {
                 DtlsError::CryptoError(CryptoError::Other(format!("DTLS error: {}", e)))
