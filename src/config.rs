@@ -679,7 +679,7 @@ impl Default for RtcConfig {
             vp9_packetizer_mode: Vp9PacketizerMode::default(),
             snap_enabled: false,
             sctp_max_message_size: 256 * 1024,
-            sctp_buffer_size: 128 * 1024,
+            sctp_buffer_size: 256 * 1024,
             sctp_transport_config: sctp_proto::TransportConfig::default()
                 .with_max_init_retransmits(None)
                 .with_max_data_retransmits(None),

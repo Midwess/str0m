@@ -14,6 +14,7 @@ use sctp_proto::{Event, Payload, PayloadProtocolIdentifier, ServerConfig, Transp
 use snap::b64_encode;
 
 pub use sctp_proto::Error as ProtoError;
+pub use sctp_proto::AssociationSnapshot;
 use sctp_proto::ReliabilityType;
 
 mod snap;
@@ -241,10 +242,7 @@ impl RtcSctp {
         mut transport: TransportConfig,
     ) -> Self {
         let mut config = EndpointConfig::default();
-        // Default here is 1200, I've seen warnings that are 77 over.
-        // DTLS above MTU 1200: 1277
-        // Let's try 1120, see if we can avoid warnings.
-        config.max_payload_size(1120);
+        config.max_payload_size(1200);
 
         transport = transport
             .with_max_send_message_size(max_message_size as u32)
@@ -276,6 +274,10 @@ impl RtcSctp {
 
     pub fn is_inited(&self) -> bool {
         self.state != RtcSctpState::Uninited
+    }
+
+    pub fn association_snapshot(&self) -> Option<AssociationSnapshot> {
+        self.assoc.as_ref().map(|a| a.snapshot())
     }
 
     pub fn init(
@@ -1118,7 +1120,7 @@ mod tests {
     #[test]
     fn partial_snap_init_requires_both_chunks() {
         let now = Instant::now();
-        let mut sctp = RtcSctp::new(262144, 131072);
+        let mut sctp = RtcSctp::new(262144, 131072, TransportConfig::default());
         let mut init_data = SctpInitData::new(262144);
 
         init_data.local_init_chunk().unwrap();
@@ -1132,7 +1134,7 @@ mod tests {
 
     #[test]
     fn malformed_remote_snap_does_not_disable_local_opt_in() {
-        let mut sctp = RtcSctp::new(262144, 131072);
+        let mut sctp = RtcSctp::new(262144, 131072, TransportConfig::default());
         sctp.enable_snap();
 
         assert!(!sctp.set_remote_snap_init_string("!!!not-valid-base64!!!"));
@@ -1144,8 +1146,8 @@ mod tests {
     /// Helper to connect a client and server RtcSctp pair to Established state.
     fn connect_client_server() -> (RtcSctp, RtcSctp) {
         let now = Instant::now();
-        let mut client = RtcSctp::new(262144, 131072);
-        let mut server = RtcSctp::new(262144, 131072);
+        let mut client = RtcSctp::new(262144, 131072, TransportConfig::default());
+        let mut server = RtcSctp::new(262144, 131072, TransportConfig::default());
 
         client.init(true, now, None).unwrap();
         server.init(false, now, None).unwrap();

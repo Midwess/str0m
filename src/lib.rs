@@ -681,6 +681,8 @@ pub mod config {
     pub use sctp_proto::TransportConfig;
 }
 
+pub use crate::sctp::AssociationSnapshot;
+
 /// Low level ICE access.
 // The ICE API is not necessary to interact with directly for "regular"
 // use of str0m. This is exported for other libraries that want to
@@ -1321,6 +1323,13 @@ impl Rtc {
         DirectApi::new(self)
     }
 
+    /// A snapshot of the SCTP association's congestion-control and timing state.
+    ///
+    /// Returns `None` until the SCTP association is established.
+    pub fn sctp_snapshot(&self) -> Option<AssociationSnapshot> {
+        self.sctp.association_snapshot()
+    }
+
     /// Send outgoing media data (frames) or request keyframes.
     ///
     /// Returns `None` if the direction isn't sending (`sendrecv` or `sendonly`).
@@ -1577,24 +1586,20 @@ impl Rtc {
             while let Some(e) = self.sctp.poll() {
                 match e {
                     SctpEvent::Transmit { mut packets } => {
-                        if let Some(v) = packets.front() {
-                            if let Err(e) = self.dtls.handle_input(v) {
-                                if is_would_block(&e) {
-                                    self.sctp.push_back_transmit(packets);
-                                    break;
-                                } else {
-                                    return Err(e.into());
+                        while let Some(v) = packets.front() {
+                            match self.dtls.handle_input(v) {
+                                Ok(()) => {
+                                    packets.pop_front();
                                 }
+                                Err(e) if is_would_block(&e) => break,
+                                Err(e) => return Err(e.into()),
                             }
-
-                            packets.pop_front();
-                            if !packets.is_empty() {
-                                self.sctp.push_back_transmit(packets);
-                            }
-
-                            restart = true;
-                            break;
                         }
+                        if !packets.is_empty() {
+                            self.sctp.push_back_transmit(packets);
+                        }
+                        restart = true;
+                        break;
                     }
                     SctpEvent::Open { id, label } => {
                         self.chan.ensure_channel_id_for(id);

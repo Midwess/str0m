@@ -2,6 +2,15 @@
 
   * Drop stale depacketizer state on stream pause and restore paused timestamp repair #929
 
+# 0.18.1 (Midwess fork)
+
+  * Raise SCTP `max_payload_size` from 1120 to 1200, recovering ~7% useful payload per UDP packet within the DTLS-1.2 AEAD overhead envelope.
+  * Drain `SctpEvent::Transmit` batches into DTLS in a single inner-loop pass instead of one packet per outer poll iteration; preserves WouldBlock semantics. Reduces per-packet outer-loop overhead under sustained tx.
+  * Raise default `RtcConfig::sctp_buffer_size` from 128 KiB to 256 KiB so the BDP of relay-class paths fits without an explicit `set_sctp_buffer_size` call.
+  * Add `Rtc::sctp_snapshot()` returning `Option<AssociationSnapshot>` for end-to-end CC visibility (cwnd, srtt, RACK marks, T3 count, etc.).
+  * Bump `sctp-proto` git pin to `ee491c8` (0.9.2).
+  * Drive-by: update three SCTP test call sites for the `RtcSctp::new(...)` `TransportConfig` parameter that was added in `1764d53` but not propagated to tests.
+
 # 0.18.0
 
   * Disable server cookie for all dimpl crypto impl #923
