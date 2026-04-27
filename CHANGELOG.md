@@ -2,6 +2,10 @@
 
   * Drop stale depacketizer state on stream pause and restore paused timestamp repair #929
 
+# 0.18.5 (Midwess fork)
+
+  * Bump `sctp-proto` to 0.10.3 (`b6b536e`) for the sticky historical-max floor in `JitterTracker` plus the `for_relay()` `rto_min_ms` 3000 -> 5000 widening. Closes the adaptive-decay regression observed at 2026-04-27T05:26 where the dynamic floor returned to static during quiet periods and the next jitter burst paid the full warmup cost again.
+
 # 0.18.4 (Midwess fork)
 
   * Bump `sctp-proto` to 0.10.2 (`7a28c88`) for the `for_relay()` static-floor restore (400ms -> 1200ms). Closes the cold-start throughput hole observed on light-mark relay paths after the 0.18.3 deploy.
