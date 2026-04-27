@@ -50,6 +50,7 @@ pub struct RtcConfig {
     pub(crate) sctp_max_message_size: usize,
     pub(crate) sctp_buffer_size: usize,
     pub(crate) sctp_transport_config: sctp_proto::TransportConfig,
+    pub(crate) sctp_transport_config_relay: Option<sctp_proto::TransportConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -637,9 +638,30 @@ impl RtcConfig {
         self
     }
 
+    /// Set both SCTP transport configurations: one for direct (host/srflx/prflx) paths
+    /// and one for relayed paths. str0m will start with `direct`, and live-swap to `relay`
+    /// when the ICE-nominated send pair becomes a TURN-relayed candidate (and back when
+    /// it migrates to a direct candidate). Removes the need for the application to
+    /// pre-decide the path type at build time.
+    pub fn set_sctp_transport_configs(
+        mut self,
+        direct: sctp_proto::TransportConfig,
+        relay: sctp_proto::TransportConfig,
+    ) -> Self {
+        self.sctp_transport_config = direct;
+        self.sctp_transport_config_relay = Some(relay);
+        self
+    }
+
     /// Get the SCTP transport configuration.
     pub fn sctp_transport_config(&self) -> &sctp_proto::TransportConfig {
         &self.sctp_transport_config
+    }
+
+    /// Get the SCTP transport configuration applied when ICE has nominated a relayed
+    /// candidate pair, if any was set via [`Self::set_sctp_transport_configs`].
+    pub fn sctp_transport_config_relay(&self) -> Option<&sctp_proto::TransportConfig> {
+        self.sctp_transport_config_relay.as_ref()
     }
 
     /// Create a [`Rtc`] from the configuration.
@@ -683,6 +705,7 @@ impl Default for RtcConfig {
             sctp_transport_config: sctp_proto::TransportConfig::default()
                 .with_max_init_retransmits(None)
                 .with_max_data_retransmits(None),
+            sctp_transport_config_relay: None,
         }
     }
 }

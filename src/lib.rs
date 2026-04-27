@@ -846,6 +846,18 @@ pub struct Rtc {
     last_timeout_reason: Reason,
     crypto_provider: Arc<crate::crypto::CryptoProvider>,
     fingerprint_verification: bool,
+    /// SCTP transport config to apply on direct (host/srflx/prflx) paths.
+    sctp_transport_config_direct: sctp_proto::TransportConfig,
+    /// SCTP transport config to apply on relayed paths, if a dual-config was supplied.
+    sctp_transport_config_relay: Option<sctp_proto::TransportConfig>,
+    /// What the latest ICE-nominated pair tells us the path type is. Updated on
+    /// every `NominatedSend` event. `None` before the first nominated pair.
+    sctp_desired_config_is_relay: Option<bool>,
+    /// What is currently applied to the underlying association. Updated only when
+    /// the swap actually lands (the association exists). Used to skip redundant
+    /// applies and to retry if the desired swap couldn't apply because the
+    /// association hadn't yet been created.
+    sctp_active_config_is_relay: Option<bool>,
 }
 
 struct SendAddr {
@@ -1157,6 +1169,9 @@ impl Rtc {
             sctp.enable_snap();
         }
 
+        let sctp_transport_config_direct = config.sctp_transport_config.clone();
+        let sctp_transport_config_relay = config.sctp_transport_config_relay.clone();
+
         Ok(Rtc {
             alive: true,
             ice,
@@ -1186,6 +1201,10 @@ impl Rtc {
             last_timeout_reason: Reason::NotHappening,
             crypto_provider,
             fingerprint_verification: config.fingerprint_verification,
+            sctp_transport_config_direct,
+            sctp_transport_config_relay,
+            sctp_desired_config_is_relay: None,
+            sctp_active_config_is_relay: None,
         })
     }
 
@@ -1413,6 +1432,59 @@ impl Rtc {
         Ok(())
     }
 
+    /// Inspect the just-nominated ICE candidate pair and update the desired SCTP
+    /// transport config based on whether either side is `Relayed`. Triggered from
+    /// the `IceAgentEvent::NominatedSend` arm. The actual swap may be deferred
+    /// until [`Self::try_apply_sctp_transport_config`] sees the SCTP association.
+    fn maybe_swap_sctp_transport_config(
+        &mut self,
+        source: SocketAddr,
+        destination: SocketAddr,
+    ) {
+        if self.sctp_transport_config_relay.is_none() {
+            return;
+        }
+        let local_is_relay = self
+            .ice
+            .local_candidates()
+            .any(|c| c.addr() == source && c.kind() == CandidateKind::Relayed);
+        let remote_is_relay = self
+            .ice
+            .remote_candidates()
+            .any(|c| c.addr() == destination && c.kind() == CandidateKind::Relayed);
+        let path_is_relay = local_is_relay || remote_is_relay;
+        self.sctp_desired_config_is_relay = Some(path_is_relay);
+        self.try_apply_sctp_transport_config();
+    }
+
+    /// Reconcile the desired SCTP transport config with what's actually applied to
+    /// the underlying association. Idempotent. Called both at NominatedSend time
+    /// (when the desired state changes) and on each poll cycle (so a desired swap
+    /// queued before the association existed eventually lands).
+    fn try_apply_sctp_transport_config(&mut self) {
+        let Some(desired) = self.sctp_desired_config_is_relay else {
+            return;
+        };
+        if self.sctp_active_config_is_relay == Some(desired) {
+            return;
+        }
+        let cfg = if desired {
+            let Some(c) = self.sctp_transport_config_relay.as_ref() else {
+                return;
+            };
+            c.clone()
+        } else {
+            self.sctp_transport_config_direct.clone()
+        };
+        if self.sctp.apply_transport_config_runtime(&cfg) {
+            debug!(
+                "SCTP transport config swapped to {} preset",
+                if desired { "relay" } else { "direct" }
+            );
+            self.sctp_active_config_is_relay = Some(desired);
+        }
+    }
+
     /// Creates a new Mid that is not in the session already.
     pub(crate) fn new_mid(&self) -> Mid {
         loop {
@@ -1504,6 +1576,7 @@ impl Rtc {
                             source,
                             destination,
                         });
+                        self.maybe_swap_sctp_transport_config(source, destination);
                     }
                 }
             }
@@ -1581,6 +1654,8 @@ impl Rtc {
             if just_connected {
                 return Ok(Output::Event(Event::Connected));
             }
+
+            self.try_apply_sctp_transport_config();
 
             let mut restart = false;
             while let Some(e) = self.sctp.poll() {

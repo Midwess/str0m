@@ -280,6 +280,21 @@ impl RtcSctp {
         self.assoc.as_ref().map(|a| a.snapshot())
     }
 
+    /// Live-swap the active transport-config knobs (RACK floor, recovery factor,
+    /// adaptive flag, RTO bounds, etc.) on the underlying association. Used by
+    /// the upper layer when ICE migrates the nominated pair between direct and
+    /// relayed candidates so that SCTP can adopt path-appropriate parameters
+    /// without tearing down the association. Resets the per-association
+    /// jitter tracker so old samples don't bias the new path.
+    pub fn apply_transport_config_runtime(&mut self, config: &TransportConfig) -> bool {
+        if let Some(assoc) = self.assoc.as_mut() {
+            assoc.apply_transport_config_runtime(config);
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn init(
         &mut self,
         client: bool,

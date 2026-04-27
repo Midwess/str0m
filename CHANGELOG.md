@@ -2,6 +2,11 @@
 
   * Drop stale depacketizer state on stream pause and restore paused timestamp repair #929
 
+# 0.18.3 (Midwess fork)
+
+  * `RtcConfig::set_sctp_transport_configs(direct, relay)` — supply two SCTP transport configs and let str0m dynamically apply the right one based on the active ICE-nominated candidate pair. When either side of the nominated pair is `CandidateKind::Relayed`, the relay config is applied via the new `Association::apply_transport_config_runtime` (sctp-proto 0.10.1); otherwise the direct config. The application no longer needs to pre-decide path type at build time, and ICE renegotiation between direct and relay paths is handled transparently. Single-config callers remain unchanged.
+  * Bump `sctp-proto` to 0.10.1 to pick up the adaptive RACK sampling fix and the live-swap API.
+
 # 0.18.2 (Midwess fork)
 
   * Map `dimpl::Error::TransmitQueueFull` to a WouldBlock-shaped `DtlsError` in `Dtls::handle_input` so the SCTP transmit-feed loop treats a saturated DTLS outbound queue as "back off and retry" rather than a terminal RTC error. Without this, the DTLS-batch drain (introduced in 0.18.1) could feed more than dimpl's 10-datagram queue cap on bursty SCTP windows and tear down the slot. Production logs at 17:14:42 saw a slot terminate with `RTC poll_event error: Rtc("DTLS error: transmit queue full")`; this commit eliminates that path.
