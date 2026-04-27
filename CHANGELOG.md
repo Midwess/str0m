@@ -2,6 +2,10 @@
 
   * Drop stale depacketizer state on stream pause and restore paused timestamp repair #929
 
+# 0.18.4 (Midwess fork)
+
+  * Bump `sctp-proto` to 0.10.2 (`7a28c88`) for the `for_relay()` static-floor restore (400ms -> 1200ms). Closes the cold-start throughput hole observed on light-mark relay paths after the 0.18.3 deploy.
+
 # 0.18.3 (Midwess fork)
 
   * `RtcConfig::set_sctp_transport_configs(direct, relay)` — supply two SCTP transport configs and let str0m dynamically apply the right one based on the active ICE-nominated candidate pair. When either side of the nominated pair is `CandidateKind::Relayed`, the relay config is applied via the new `Association::apply_transport_config_runtime` (sctp-proto 0.10.1); otherwise the direct config. The application no longer needs to pre-decide path type at build time, and ICE renegotiation between direct and relay paths is handled transparently. Single-config callers remain unchanged.
